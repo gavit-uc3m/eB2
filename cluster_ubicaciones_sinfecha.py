@@ -24,7 +24,7 @@ py.tools.set_credentials_file(username='fjcadenastsc', api_key='8qk7LoGKn6uJtAQC
 
 
 ## Read json file
-filename = 'pruebas7'  # 'test-lg-g4' 
+filename = 'test-lg-g4'  # 'test-lg-g4' 
 file_path = './' + filename + '_geowithplaces.json'
 
 with open(file_path, encoding='utf-8-sig') as json_file:
@@ -41,7 +41,7 @@ for datapoint in datapoints_array:
     if coordinates['longitude']!=-1 and coordinates['latitude']!=-1 :
         if coordinates['accuracy'] < 50:
             if datapoint['body']['attributes']['speed'] < 2:
-                data.append([time_frame, coordinates['longitude'], coordinates['latitude']])
+                data.append([time_frame, coordinates['longitude'], coordinates['latitude'], coordinates['altitude']])
 
 ## Export data to .mat file and plot
 data = np.array(data)
@@ -56,6 +56,9 @@ plt.show()
 
 km = 0.4
 samp_min = 5
+
+eps_a = 0.09
+alpha_a = 0.25/eps_a
 
 ##
 
@@ -72,8 +75,13 @@ clustered_y = []
 geo = data[:, 1:3]
 geo_matrix_dist = dist.cdist(geo, geo, metric="euclidean")
 
+alt = data[:, 3:4]
+alt_dist_matrix = dist.cdist(alt, alt, metric="hamming")
+
+dist_data = geo_matrix_dist * (1 + alpha_a * (alt_dist_matrix - eps_a))
+
 db = DBSCAN(eps=d_min, metric='precomputed', min_samples=samp_min)
-db.fit(geo_matrix_dist)
+db.fit(dist_data)
 
 labels = db.labels_
 

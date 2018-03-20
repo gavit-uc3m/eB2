@@ -12,7 +12,6 @@ x_0 = -3.77;
 y_0 = +40.332;
 
 
-
 %% Raw
 % datos = load('/Users/gavit/Documents/Evidance-Based Behavior/Acceso_mongo/test-lg-g4_geowithplaces.mat');
 datos = load('/Users/gavit/Documents/Evidance-Based Behavior/Acceso_mongo/pruebas7.mat');
