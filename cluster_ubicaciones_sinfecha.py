@@ -23,18 +23,22 @@ py.tools.set_credentials_file(username='fjcadenastsc', api_key='8qk7LoGKn6uJtAQC
 
 
 
-## Read json file
+## Read json files
 filename = 'test-lg-g4'  # 'test-lg-g4' 
-file_path = './' + filename + '_geowithplaces.json'
 
+file_path = './' + filename + '_geowithplaces.json'
 with open(file_path, encoding='utf-8-sig') as json_file:
-    datapoints_array = json.load(json_file)
-    
+    datapoints_geo = json.load(json_file)
+json_file.close()
+
+file_path = './' + filename + '_wifis.json'
+with open(file_path, encoding='utf-8-sig') as json_file:
+    datapoints_wifis = json.load(json_file)
 json_file.close()
 
 ## Filter invalid samples
 data = []
-for datapoint in datapoints_array:
+for datapoint in datapoints_geo:
     
     coordinates = datapoint['body']['coordinates']
     time_frame = datapoint['body']['effective_time_frame']['date_time']['$date']/1000 #Time in seconds
@@ -57,8 +61,11 @@ plt.show()
 km = 0.4
 samp_min = 5
 
-eps_a = 0.09
-alpha_a = 0.25/eps_a
+eps_alt = 10
+eps_w = 0.001
+
+alpha_alt = 0.25/eps_alt
+alpha_w = 0.25/eps_w
 
 ##
 
@@ -71,15 +78,19 @@ data_iter = []
 clustered_x = []
 clustered_y = []
 
-
+## Compute distances
 geo = data[:, 1:3]
 geo_matrix_dist = dist.cdist(geo, geo, metric="euclidean")
 
 alt = data[:, 3:4]
 alt_dist_matrix = dist.cdist(alt, alt, metric="hamming")
 
-dist_data = geo_matrix_dist * (1 + alpha_a * (alt_dist_matrix - eps_a))
+#wifi = data[:, 4:-1]
+#wifi_dist_matrix = dist.cdist(wifi, wifi, metric="hamming")
 
+dist_data = geo_matrix_dist * (1 + alpha_alt*(alt_dist_matrix-eps_alt) ) #+ alpha_w*(wifi_dist_matrix-eps_w) )
+
+## DBSCAN algoritm
 db = DBSCAN(eps=d_min, metric='precomputed', min_samples=samp_min)
 db.fit(dist_data)
 
@@ -93,16 +104,6 @@ cluster_list = list(unique_labels)
 
 traces = []
 
-#trace_no_cluster = Scattergl(
-#    x=geo_pos[np.where(labels == -1)[0], 0],
-#    y=geo_pos[np.where(labels == -1)[0], 1],
-#    mode='markers',
-#    marker=dict(
-#        size=2
-#    )
-#)
-#
-#traces.append(trace_no_cluster)
 
 for cluster in cluster_list:
     x1 = [geo[np.where(labels == cluster)[0], 0], cluster]

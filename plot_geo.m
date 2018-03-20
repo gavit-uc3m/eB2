@@ -5,7 +5,7 @@ clc
 %% Centrar datos
 
 % Create rotation matrix
-theta = 166; % Gaspar: 199, Juanjo: 166
+theta = 199; % Gaspar: 199, Juanjo: 166
 R = [cosd(theta) -sind(theta); sind(theta) cosd(theta)];
 
 x_0 = -3.77;
@@ -13,8 +13,7 @@ y_0 = +40.332;
 
 
 %% Raw
-% datos = load('/Users/gavit/Documents/Evidance-Based Behavior/Acceso_mongo/test-lg-g4_geowithplaces.mat');
-datos = load('/Users/gavit/Documents/Evidance-Based Behavior/Acceso_mongo/pruebas7.mat');
+datos = load('/Users/gavit/Documents/GitHub/eB2/test-lg-g4.mat');
 
 data = datos.data;
 
@@ -29,8 +28,7 @@ subplot(1,2,1), plot_google_map
 
 %% Clustered
 
-% datos_clus = load('/Users/gavit/Documents/Evidance-Based Behavior/Acceso_mongo/test-lg-g4_geowithplaces_clustered.mat');
-datos_clus = load('/Users/gavit/Documents/Evidance-Based Behavior/Acceso_mongo/pruebas7_clustered.mat');
+datos_clus = load('/Users/gavit/Documents/GitHub/eB2/test-lg-g4_clustered.mat');
 
 x_clus = datos_clus.x ;
 y_clus = datos_clus.y ;
