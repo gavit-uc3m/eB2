@@ -36,8 +36,8 @@ with open(file_path, encoding='utf-8-sig') as json_file:
     datapoints_wifis = json.load(json_file)
 json_file.close()
 
-## Filter invalid samples
-data = []
+## Load data and filter invalid samples
+data_geo = []
 for datapoint in datapoints_geo:
     
     coordinates = datapoint['body']['coordinates']
@@ -45,14 +45,28 @@ for datapoint in datapoints_geo:
     if coordinates['longitude']!=-1 and coordinates['latitude']!=-1 :
         if coordinates['accuracy'] < 50:
             if datapoint['body']['attributes']['speed'] < 2:
-                data.append([time_frame, coordinates['longitude'], coordinates['latitude'], coordinates['altitude']])
+#                if 'places' in datapoint['body'].keys():
+#                    print(datapoint['body']['places'])
+                data_geo.append([time_frame, coordinates['longitude'], coordinates['latitude'], coordinates['altitude']])
+
+data_geo = np.array(data_geo)
+
+#data_wifi = []
+#for datapoint in datapoints_wifis:
+#    
+#    wifi_id = []
+#    wifis = datapoint['body']['wifis']
+#    
+#    for wifi_hash in wifis:
+#        
+#    time_frame = datapoint['body']['effective_time_frame']['date_time']['$date']/1000 #Time in seconds
+#    data_wifi.append([time_frame, wifis ])
+#
+#data_wifi = np.array(data_wifi)
 
 ## Export data to .mat file and plot
-data = np.array(data)
-
-scipy.io.savemat(filename+'.mat', {'data': data})
-
-plt.plot(data[:,1], data[:,2], 'bo')
+scipy.io.savemat(filename+'.mat', {'data': data_geo})
+plt.plot(data_geo[:,1], data_geo[:,2], 'bo')
 plt.show()
 
 
@@ -79,10 +93,10 @@ clustered_x = []
 clustered_y = []
 
 ## Compute distances
-geo = data[:, 1:3]
+geo = data_geo[:, 1:3]
 geo_matrix_dist = dist.cdist(geo, geo, metric="euclidean")
 
-alt = data[:, 3:4]
+alt = data_geo[:, 3:4]
 alt_dist_matrix = dist.cdist(alt, alt, metric="hamming")
 
 #wifi = data[:, 4:-1]
