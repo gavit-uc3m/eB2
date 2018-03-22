@@ -43,8 +43,8 @@ for datapoint in datapoints_geo:
     coordinates = datapoint['body']['coordinates']
     time_frame = datapoint['body']['effective_time_frame']['date_time']['$date']/1000 #Time in seconds
     if coordinates['longitude']!=-1 and coordinates['latitude']!=-1 :
-        if coordinates['accuracy'] < 50:
-            if datapoint['body']['attributes']['speed'] < 2:
+        if coordinates['accuracy'] < 100:
+            if datapoint['body']['attributes']['speed'] < 0.5:
 #                if 'places' in datapoint['body'].keys():
 #                    print(datapoint['body']['places'])
                 data_geo.append([time_frame, coordinates['longitude'], coordinates['latitude'], coordinates['altitude']])
