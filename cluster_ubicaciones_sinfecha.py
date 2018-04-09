@@ -43,7 +43,7 @@ for datapoint in datapoints_geo:
     coordinates = datapoint['body']['coordinates']
     time_frame = datapoint['body']['effective_time_frame']['date_time']['$date']/1000 #Time in seconds
     if coordinates['longitude']!=-1 and coordinates['latitude']!=-1 :
-        if coordinates['accuracy'] < 100:
+        if coordinates['accuracy'] < 90:
             if datapoint['body']['attributes']['speed'] < 0.5:
 #                if 'places' in datapoint['body'].keys():
 #                    print(datapoint['body']['places'])
@@ -72,7 +72,7 @@ plt.show()
 
 ## Parametros modificables
 
-km = 0.4
+km = 0.5
 samp_min = 5
 
 eps_alt = 10
