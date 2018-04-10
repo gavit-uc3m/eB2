@@ -5,7 +5,7 @@ clc
 %% Centrar datos
 
 % Create rotation matrix
-theta = 199; % Gaspar: 199, Juanjo: 166
+theta = 198; % Gaspar: 199, Juanjo: 166
 R = [cosd(theta) -sind(theta); sind(theta) cosd(theta)];
 
 x_0 = -3.77;

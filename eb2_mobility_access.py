@@ -16,7 +16,7 @@ time_period = {
 
 
 data_type= "geowithplaces"
-# "wifis"
+#data_type= "wifis"
 
 # Automaticamente genera el .m
 for user in users:

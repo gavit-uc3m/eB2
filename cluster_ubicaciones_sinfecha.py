@@ -51,20 +51,57 @@ for datapoint in datapoints_geo:
 
 data_geo = np.array(data_geo)
 
-#data_wifi = []
-#for datapoint in datapoints_wifis:
-#    
-#    wifi_id = []
-#    wifis = datapoint['body']['wifis']
-#    
-#    for wifi_hash in wifis:
-#        
-#    time_frame = datapoint['body']['effective_time_frame']['date_time']['$date']/1000 #Time in seconds
-#    data_wifi.append([time_frame, wifis ])
-#
-#data_wifi = np.array(data_wifi)
+## Load wifi data and preprocess it
+data_wifi = []
+hash_list = []
 
-## Export data to .mat file and plot
+for datapoint in datapoints_wifis:
+    
+    wifis = datapoint['body']['wifis']
+    wifi_list = []
+    wifi_list_id = []
+    
+    for wifi_hash in wifis:
+        hash_name = wifi_hash.split('-')[0][0:-1]
+        power = wifi_hash.split(' ')[1]
+        wifi_list.append([power, hash_name])
+    wifi_list.sort()
+    
+    if len(wifi_list) >= 5:
+        wifi_list = list(np.array(wifi_list)[0:5,1])
+    elif len(wifi_list) == 0:
+        wifi_list = []
+    else:
+        wifi_list = list(np.array(wifi_list)[0:len(wifi_list),1])
+     
+    for item in wifi_list:
+        if item not in hash_list:
+            hash_list.append(item)
+        wifi_list_id.append(hash_list.index(item))
+                 
+    time_frame = datapoint['body']['effective_time_frame']['date_time']['$date']/1000
+    data_wifi.append([time_frame, wifi_list_id ])
+data_wifi.sort(reverse=True)
+
+wifi_matrix = []
+for idx in range(0, len(data_wifi)):    
+    mask = np.zeros((len(hash_list), 1))
+    mask[data_wifi[idx][1]] = 1 
+    data_wifi[idx][1] = mask
+    wifi_matrix.append(mask.reshape(1,len(mask)))
+    
+wifi_matrix = np.stack(wifi_matrix)
+wifi_matrix = wifi_matrix[:,0,:]
+#wifi_matrix = np.array(wifi_matrix)
+    
+del mask, idx, hash_name, power, wifi_hash, wifi_list, wifi_list_id, wifis, item
+
+
+## End wifi data processing
+
+
+
+## Export geo data to .mat file and plot
 scipy.io.savemat(filename+'.mat', {'data': data_geo})
 plt.plot(data_geo[:,1], data_geo[:,2], 'bo')
 plt.show()
@@ -72,10 +109,10 @@ plt.show()
 
 ## Parametros modificables
 
-km = 0.5
+km = 0.4
 samp_min = 5
 
-eps_alt = 10
+eps_alt = 5
 eps_w = 0.001
 
 alpha_alt = 0.25/eps_alt
@@ -96,11 +133,11 @@ clustered_y = []
 geo = data_geo[:, 1:3]
 geo_matrix_dist = dist.cdist(geo, geo, metric="euclidean")
 
-alt = data_geo[:, 3:4]
+alt = data_geo[:, 3]
+alt = alt.reshape((len(alt),1))
 alt_dist_matrix = dist.cdist(alt, alt, metric="hamming")
 
-#wifi = data[:, 4:-1]
-#wifi_dist_matrix = dist.cdist(wifi, wifi, metric="hamming")
+wifi_dist_matrix = dist.cdist(wifi_matrix, wifi_matrix, metric="hamming")
 
 dist_data = geo_matrix_dist * (1 + alpha_alt*(alt_dist_matrix-eps_alt) ) #+ alpha_w*(wifi_dist_matrix-eps_w) )
 
