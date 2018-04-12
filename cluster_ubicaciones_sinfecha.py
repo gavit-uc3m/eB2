@@ -18,13 +18,13 @@ import matplotlib.pyplot as plt
 
 import plotly.offline as py_off
 import plotly.plotly.plotly as py
-from plotly.graph_objs import *
+from plotly.graph_objs import Scattergl, Layout, Figure, Data
 py.tools.set_credentials_file(username='fjcadenastsc', api_key='8qk7LoGKn6uJtAQC9Zop')
 
 
 
 ## Read json files
-filename = 'test-lg-g4'  # 'test-lg-g4' 
+filename = 'test-lg-g4'
 
 file_path = './' + filename + '_geowithplaces.json'
 with open(file_path, encoding='utf-8-sig') as json_file:
@@ -50,6 +50,9 @@ for datapoint in datapoints_geo:
                 data_geo.append([time_frame, coordinates['longitude'], coordinates['latitude'], coordinates['altitude']])
 
 data_geo = np.array(data_geo)
+geo_ts = np.array(data_geo[:,0])
+#geo_ts = np.flipud(np.sort(np.array(data_geo[:,0])))
+
 
 ## Load wifi data and preprocess it
 data_wifi = []
@@ -60,7 +63,8 @@ for datapoint in datapoints_wifis:
     wifis = datapoint['body']['wifis']
     wifi_list = []
     wifi_list_id = []
-    
+    time_frame = datapoint['body']['effective_time_frame']['date_time']['$date']/1000 #Time in seconds
+        
     for wifi_hash in wifis:
         hash_name = wifi_hash.split('-')[0][0:-1]
         power = wifi_hash.split(' ')[1]
@@ -78,27 +82,57 @@ for datapoint in datapoints_wifis:
         if item not in hash_list:
             hash_list.append(item)
         wifi_list_id.append(hash_list.index(item))
-                 
-    time_frame = datapoint['body']['effective_time_frame']['date_time']['$date']/1000
-    data_wifi.append([time_frame, wifi_list_id ])
-data_wifi.sort(reverse=True)
+    
+    data_wifi.append([time_frame, wifi_list_id])
+        
+#data_wifi.sort(reverse=True)
+wifi_ts = np.array([item[0] for item in data_wifi])
+
+    #wifi_ts = np.flipud(np.sort(np.array(data_wifi)[:,0]))
+    #geo_ts = geo_ts - (geo_ts[0]-wifi_ts[0])
+    #
+    #geo_ts_date = []
+    #
+    #for item in geo_ts:
+    #    geo_ts_date.append([(datetime.fromtimestamp(item).year, datetime.fromtimestamp(item).month, \
+    #                         datetime.fromtimestamp(item).day), (datetime.fromtimestamp(item).hour, datetime.fromtimestamp(item).minute)])
+    #
+    #wifi_ts_date = []
+    #
+    #for item in wifi_ts:
+    #    wifi_ts_date.append([(datetime.fromtimestamp(item).year, datetime.fromtimestamp(item).month, \
+    #                          datetime.fromtimestamp(item).day), (datetime.fromtimestamp(item).hour, datetime.fromtimestamp(item).minute)])
+
 
 wifi_matrix = []
-for idx in range(0, len(data_wifi)):    
+for idx in range(0, len(data_wifi)): 
     mask = np.zeros((len(hash_list), 1))
     mask[data_wifi[idx][1]] = 1 
     data_wifi[idx][1] = mask
     wifi_matrix.append(mask.reshape(1,len(mask)))
     
-wifi_matrix = np.stack(wifi_matrix)
-wifi_matrix = wifi_matrix[:,0,:]
-#wifi_matrix = np.array(wifi_matrix)
+wifi_matrix = np.stack(wifi_matrix)[:,0,:]
     
+
+
+# TimeStamp Preprocessing
+dims_wifi = wifi_matrix.shape[1]
+wifi_matrix_processed = []
+
+for idx in range(0, len(geo_ts)):
+    
+    ts = geo_ts[idx]
+
+    wifi_idx = np.where(((ts - 60) <= wifi_ts) * (wifi_ts <= (ts + 60)))[0]
+    if len(wifi_idx) > 0:
+        wifi_values = wifi_matrix[wifi_idx, :]
+    else:
+        wifi_values = np.zeros((1, dims_wifi))
+    wifi_matrix_processed.append(wifi_values)
+wifi_matrix_processed = np.stack(wifi_matrix_processed)[:,0,:]
+
 del mask, idx, hash_name, power, wifi_hash, wifi_list, wifi_list_id, wifis, item
-
-
 ## End wifi data processing
-
 
 
 ## Export geo data to .mat file and plot
@@ -112,8 +146,8 @@ plt.show()
 km = 0.4
 samp_min = 5
 
-eps_alt = 5
-eps_w = 0.001
+eps_alt = 50
+eps_w = 0.002
 
 alpha_alt = 0.25/eps_alt
 alpha_w = 0.25/eps_w
@@ -125,21 +159,28 @@ d_min = km / km_per_radian
 
 
 indexes = []
-data_iter = []
 clustered_x = []
 clustered_y = []
 
+print('\nPreprocessing completed')
+t0 = time()
+
 ## Compute distances
 geo = data_geo[:, 1:3]
-geo_matrix_dist = dist.cdist(geo, geo, metric="euclidean")
+geo_dist_matrix = dist.cdist(geo, geo, metric="euclidean")
 
 alt = data_geo[:, 3]
 alt = alt.reshape((len(alt),1))
-alt_dist_matrix = dist.cdist(alt, alt, metric="hamming")
+alt_dist_matrix = dist.cdist(alt, alt, metric="euclidean")
 
-wifi_dist_matrix = dist.cdist(wifi_matrix, wifi_matrix, metric="hamming")
+wifi_dist_matrix = dist.cdist(wifi_matrix_processed, wifi_matrix_processed, metric="hamming")
 
-dist_data = geo_matrix_dist * (1 + alpha_alt*(alt_dist_matrix-eps_alt) ) #+ alpha_w*(wifi_dist_matrix-eps_w) )
+dist_data = geo_dist_matrix * (1 + alpha_alt*(alt_dist_matrix-eps_alt) + alpha_w*(wifi_dist_matrix-eps_w) )
+
+print('\nDistances computed')
+duration = time() - t0
+print("\nDistances computed in %f seconds" %duration)
+
 
 ## DBSCAN algoritm
 db = DBSCAN(eps=d_min, metric='precomputed', min_samples=samp_min)
