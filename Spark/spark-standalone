@@ -1,0 +1,126 @@
+#!/bin/bash
+COARSE_FLAG=false
+CORES=64
+TIMEOUT=300
+SVERSION=2.3.0
+PYSPARK_CONFIG_FILE_OPT=""
+MEMORY_MAX=0
+MESOS_MASTER="mesos://zk://10.0.12.77:2181,10.0.12.78:2181,10.0.12.51:2181,10.0.12.60:2181,10.0.12.75:2181,10.0.12.76:2181,10.0.12.18:2181/mesos"
+MONGO_API=1
+PACKAGES_CMD=""
+HIVE_DB_PATH="${HOME}/.hive/"
+
+export PYSPARK_PYTHON=python3
+export PYSPARK_DRIVER_PYTHON=python3
+export SPARK_PYTHON_OPTIONS="--conf spark.pyspark.python=/usr/bin/python3 --conf spark.pyspark.driver.python=/usr/bin/jupyter"
+
+while getopts "Cc:n:T:V:F:M:H:L:2" flag
+  do
+    case $flag in
+        C)
+          COARSE_FLAG=true
+        ;;
+        c)
+          CORES=$OPTARG
+        ;;
+        n)
+          TASKNAME="$OPTARG"
+        ;;
+	T)
+	  TIMEOUT=$OPTARG
+	;;
+	V)
+	  SVERSION=${OPTARG}
+	;;
+	H)
+	  MESOS_MASTER="mesos://${OPTARG}:5050"
+	;;
+	M)
+	  MEMORY_MAX=${OPTARG}
+	;;
+	2)
+	  export PYSPARK_PYTHON=python2
+	  export SPARK_PYTHON_OPTIONS="--conf spark.pyspark.python=/usr/bin/python2 --conf spark.pyspark.driver.python=/usr/bin/python2"
+	;;
+    esac
+  done
+
+if [ -d /opt/spark-${SVERSION}-bin-2.6.0 ]
+then
+  SPARK_HOME=/opt/spark-${SVERSION}-bin-2.6.0
+  HADOOP_VERSION=2.6.0
+elif [ -d /opt/spark-${SVERSION}-bin-2.7.3 ]
+then
+  SPARK_HOME=/opt/spark-${SVERSION}-bin-2.7.3
+  HADOOP_VERSION=2.7.3
+else
+  SPARK_HOME=/opt/spark-${SVERSION}-bin-2.8.2
+  HADOOP_VERSION=2.8.2
+fi
+
+export SITE_NAME=`uname -n`
+SPARK_VH=`echo $SVERSION | cut -d . -f 1 `
+SPARK_VL=`echo $SVERSION | cut -d . -f 2 `
+HIVE_DB_PATH_M=`uname -n`
+HIVE_DB_PATH="${HIVE_DB_PATH}/${HIVE_DB_PATH_M}.$$"
+
+if [ ! -d $HIVE_DB_PATH ]
+then
+  mkdir -p $HIVE_DB_PATH
+fi
+
+HIVE_DB_PATH="file://${HIVE_DB_PATH}"
+
+if [ $SPARK_VH  -lt 2 ]
+then
+  export PACKAGES_CMD="${PACKAGES_CMD} --packages com.databricks:spark-csv_2.11:1.2.0"
+  export PYTHONHASHSEED=1
+else
+  export PYTHONHASHSEED=0
+fi
+
+if [ $MONGO_API -gt 0 ]
+then
+  export PACKAGES_CMD="${PACKAGES_CMD} --conf spark.mongodb.input.uri=${MONGO_INPUT}"
+  export PACKAGES_CMD="${PACKAGES_CMD} --conf spark.mongodb.output.uri=${MONGO_OUTPUT}"
+  if [ $SPARK_VH -ge 2 ]
+  then
+    export PACKAGES_CMD="${PACKAGES_CMD} --packages org.mongodb.spark:mongo-spark-connector_2.11:2.0.0"
+  else 
+    export PACKAGES_CMD="${PACKAGES_CMD} --packages org.mongodb.spark:mongo-spark-connector_2.11:1.1.0"
+  fi
+fi
+
+export LD_PRELOAD=/opt/intel/composerxe/compiler/lib/intel64/libiomp5.so:/opt/intel/composerxe/mkl/lib/intel64/libmkl_core.so:/opt/intel/composerxe/mkl/lib/intel64/libmkl_rt.so
+
+export SPARK_DRIVER_OPTS="--conf spark.driver.extraClassPath=/usr/share/jdbc-mysql/lib/jdbc-mysql.jar --conf spark.driver.ClassPath=/usr/share/jdbc-mysql/lib/jdbc-mysql.jar --jars /usr/share/jdbc-mysql/lib/jdbc-mysql.jar --conf spark.driver.extraClassPath=/opt/utilities/tools/jdbc-mysql/jdbc-mysql.jar --conf spark.driver.ClassPath=/opt/utilities/tools/jdbc-mysql/jdbc-mysql.jar --jars /opt/utilities/tools/jdbc-mysql/jdbc-mysql.jar --conf spark.driver.maxResultSize=${MEMORY_MAX} --conf spark.local.dir=/export/workdir/spark/tmp --driver-memory 20G --driver-cores 8 --driver-class-path /etc/hadoop/hdfs-site.xml:/etc/hadoop/core-site.xml:/etc/hadoop --conf spark.sql.warehouse.dir=${HIVE_DB_PATH}"
+
+export SPARK_EXECUTOR_OPTS="--conf spark.shuffle.io.connectionTimeout=180000 --executor-memory 8G --total-executor-cores ${CORES} --conf spark.shuffle.service.enabled=true --conf spark.executorEnv.LD_PRELOAD=${LD_PRELOAD} --conf spark.executorEnv.PYTHONHASHSEED=${PYTHONHASHSEED}"
+
+export SPARK_PARAMETERS="${SPARK_PYTHON_OPTIONS} --conf=spark.eventLog.dir=/var/tmp --conf spark.executor.uri=/opt/spark-dist/spark-${SVERSION}-bin-${HADOOP_VERSION}.tgz --conf spark.mesos.coarse=${COARSE_FLAG} ${PACKAGES_CMD} ${MESOS_SECURITY} ${SPARK_EXECUTOR_OPTS} ${SPARK_DRIVER_OPTS} --master ${MESOS_MASTER}"
+
+export LOCAL_SPARK_JAVA_OPTS="--conf spark.shuffle.service.enabled=true --conf spark.rpc.askTimeout=${TIMEOUT} --conf spark.network.timeout=${TIMEOUT}"
+
+export SPARKR_SUBMIT_ARGS="${SPARK_PARAMETERS} ${LOCAL_SPARK_JAVA_OPTS} sparkr-shell " 
+
+export LOG_FILE=${HOSTNAME}.$$.log
+export ERR_FILE=${HOSTNAME}.$$.err
+#
+#
+# EDITAR LA SIGUIENTE LINEA Y ESCRIBIR EL PROCESO A LANZAR EN SPARK
+
+
+PROCESS_OPTIONS="mobility_summary.py"
+
+#
+# -----
+#
+if [ "X${PROCESS_OPTIONS}" == "X" ]
+then
+  printf "Hay que configurar la variable PROCESS_OPTIONS con el script y parametros de ejecucion de la aplicacion\n"
+  exit -1
+fi
+
+
+${SPARK_HOME}/bin/spark-submit --name "${TASKNAME}:${SITE_NAME}" ${SPARK_PARAMETERS} ${LOCAL_SPARK_JAVA_OPTS}  $PROCESS_OPTIONS
+
