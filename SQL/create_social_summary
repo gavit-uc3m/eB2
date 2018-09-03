@@ -1,0 +1,59 @@
+-- -----------------------------------------------------
+-- Table 'social_summary'
+-- -----------------------------------------------------
+DROP TABLE IF EXISTS 'social_summary' ;
+
+CREATE TABLE IF NOT EXISTS 'social_summary' (
+  'service' VARCHAR(10) NOT NULL,
+  'user' VARCHAR(45) NOT NULL,
+  'date' DATE NOT NULL,
+  PRIMARY KEY ('service', 'user', 'date'))
+ENGINE = InnoDB;
+
+
+-- -----------------------------------------------------
+-- Table 'call_register'
+-- -----------------------------------------------------
+DROP TABLE IF EXISTS 'call_register' ;
+
+CREATE TABLE IF NOT EXISTS 'call_register' (
+  'id' INT NOT NULL AUTO_INCREMENT,
+  'time' INT NULL,
+  'duration' INT NULL,
+  'number' VARCHAR(100) NULL,
+  'type' VARCHAR(45) NULL,
+  'social_summary_service' VARCHAR(10) NOT NULL,
+  'social_summary_user' VARCHAR(45) NOT NULL,
+  'social_summary_date' DATE NOT NULL,
+  PRIMARY KEY ('id'),
+  INDEX 'fk_call_register_social_summary1_idx' ('social_summary_service' ASC, 'social_summary_user' ASC, 'social_summary_date' ASC),
+  CONSTRAINT 'fk_call_register_social_summary1'
+    FOREIGN KEY ('social_summary_service' , 'social_summary_user' , 'social_summary_date')
+    REFERENCES 'social_summary' ('service' , 'user' , 'date')
+    ON DELETE NO ACTION
+    ON UPDATE NO ACTION)
+ENGINE = InnoDB;
+
+
+-- -----------------------------------------------------
+-- Table 'appusage'
+-- -----------------------------------------------------
+DROP TABLE IF EXISTS 'appusage' ;
+
+CREATE TABLE IF NOT EXISTS 'appusage' (
+  'id' INT NOT NULL AUTO_INCREMENT,
+  'slot' INT NULL,
+  'app' VARCHAR(100) NULL,
+  'time' INT NULL,
+  'social_summary_service' VARCHAR(10) NOT NULL,
+  'social_summary_user' VARCHAR(45) NOT NULL,
+  'social_summary_date' DATE NOT NULL,
+  PRIMARY KEY ('id'),
+  INDEX 'fk_appusage_social_summary1_idx' ('social_summary_service' ASC, 'social_summary_user' ASC, 'social_summary_date' ASC),
+  CONSTRAINT 'fk_appusage_social_summary1'
+    FOREIGN KEY ('social_summary_service' , 'social_summary_user' , 'social_summary_date')
+    REFERENCES 'social_summary' ('service' , 'user' , 'date')
+    ON DELETE NO ACTION
+    ON UPDATE NO ACTION)
+ENGINE = InnoDB;
+
