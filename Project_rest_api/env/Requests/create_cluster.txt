@@ -1,0 +1,41 @@
+
+
+Crear cluster:
+
+Method: projects.regions.clusters.create
+
+POST https://dataproc.googleapis.com/v1beta2/projects/eb2test-206611/regions/europe-west1/clusters
+
+{
+  "clusterName": "spark-daily",
+  "projectId": "eb2test-206611",
+  "config": {
+    "gceClusterConfig": {
+      "zoneUri": "europe-west1-d"
+    },
+    "configBucket": "dataproc-1d944e68-ce97-4314-bbd1-366adb951fce-europe-west1",
+    "masterConfig": {
+      "numInstances": 1,
+      "machineTypeUri": "n1-highmem-4",
+      "diskConfig": {
+        "bootDiskSizeGb": 100
+      }
+    },
+    "workerConfig": {
+      "numInstances": 4,
+      "machineTypeUri": "n1-highmem-4",
+      "diskConfig": {
+        "bootDiskSizeGb": 50
+      }
+    },
+    "softwareConfig": {
+      "properties": {
+        "spark:spark.yarn.executor.memoryOverhead": "1920m"
+      }
+    },
+    "lifecycleConfig": {
+      "idleDeleteTtl": "600s"
+    },
+
+  }
+}

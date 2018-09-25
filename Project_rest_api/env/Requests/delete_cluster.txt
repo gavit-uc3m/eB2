@@ -1,0 +1,9 @@
+
+
+Borrar cluster:
+
+Method: projects.regions.clusters.delete
+
+DELETE https://dataproc.googleapis.com/v1beta2/projects/eb2test-206611/regions/europe-west1/clusters/spark-daily
+
+
