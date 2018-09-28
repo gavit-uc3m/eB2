@@ -22,7 +22,7 @@ import scipy.io
 
 
 print("\n\nInicio codigo\n")
-print(float(3/6371))
+
 t0 = time() #To measure whole processing time
 
 sc = pyspark.SparkContext()
