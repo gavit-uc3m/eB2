@@ -22,7 +22,7 @@ import scipy.io
 
 
 print("\n\nInicio codigo\n")
-print(3/6371)
+print(float(3/6371))
 t0 = time() #To measure whole processing time
 
 sc = pyspark.SparkContext()
@@ -47,13 +47,14 @@ input_path.getFileSystem(sc._jsc.hadoopConfiguration()).delete(input_path, True)
 ## ---------- Reading from last_modification table -------------------
 
 url = "jdbc:mysql://35.195.77.246/test-node"
-user = "root"
-password = "root"
+user = "admin"
+password = "1b93e9058ff1d3e4b7b466ba92e7b22e"
 driver = "com.mysql.jdbc.Driver"
 properties = {
     "user": user,
     "password": password,
-    "driver": driver
+    "driver": driver,
+    "useSSL": "false"
     }
 
 header_schema = StructType([StructField('service', StringType(), True),
@@ -61,6 +62,24 @@ header_schema = StructType([StructField('service', StringType(), True),
                 StructField('date', DateType(), True),
                 StructField('data_type', StringType(), False)
                 ])
+
+clust_schema = StructType([StructField('user', StringType(), False),
+                          StructField('longitude', FloatType(), False),
+                          StructField('latitude', FloatType(), False),
+                          StructField('radius', FloatType(), False),
+                          StructField('weight', FloatType(), False),
+                          StructField('LS1', FloatType(), False),
+                          StructField('LS2', FloatType(), False),
+                          StructField('SS1', FloatType(), False),
+                          StructField('SS2', FloatType(), False),
+                          StructField('creationTimeStamp', IntegerType(), False),
+                          StructField('altitude', FloatType(), True),
+                          StructField('wifi', StringType(), True),
+                          StructField('bluetooth', StringType(), True),
+                          StructField('activities', StringType(), True),
+                          StructField('places', StringType(), True),
+                          StructField('type_cluster', StringType(), False),
+                         ])
 
 df_last_mod = sqlContext.read.jdbc(url=url, table='last_modification', properties=properties)
 
@@ -92,14 +111,15 @@ df_clusters = sqlContext.read.jdbc(url=url, table='clusters', properties=propert
 broadcast_data_type = sc.broadcast('clustering')
 broadcast_date = sc.broadcast(last_mod_actual.collect())
 broadcast_clusters = sc.broadcast(df_clusters.rdd.collect())
+
 '''
 print('\nbroadcast_date: ')
 print(broadcast_date.value)
-print('\nlast_mod_aux: ')
-print(last_mod_aux.collect())
-print('\ndf_last_mod: ')
-print(df_last_mod.rdd.collect())
+print('\nbroadcast_clusters: ')
+print(broadcast_clusters.value)
+print('\n')
 '''
+
 ## -------------------------------------------------------------------
 
 
@@ -135,7 +155,11 @@ sql_query = """
 SELECT *
 from data
 where longitude is not null
+and longitude > -180
+and longitude < 180
 and latitude is not null
+and latitude > -90
+and latitude < 90
 and speed < 0.5
 and accuracy < 200
 """
@@ -187,9 +211,9 @@ def nearestCluster (micro_cluster, sample):
         
         if (minCluster == None):
             minCluster = cluster
-            minDist = np.linalg.norm(sample - cluster.center)
+            minDist = np.linalg.norm(sample.value - cluster.center)
 
-        dist = np.linalg.norm(sample - cluster.center)
+        dist = np.linalg.norm(sample.value - cluster.center)
         dist -= cluster.radius
 
         if (dist < minDist):
@@ -219,6 +243,11 @@ def clustering(x):
 
     user = x[0]
     data = x[1]
+    index = ['Row'+str(i) for i in range(1, len(data)+1)]
+    df = pd.DataFrame(data=data, index=index, columns=['time','long','lat']).dropna(axis=1)
+
+    times = df['time']
+    buffer_data = df.drop(['time'], axis=1)
 
     last_mod = [y for y in broadcast_date.value if (y[1] == user) ]
     
@@ -232,9 +261,6 @@ def clustering(x):
         pMicroCluster = []
         oMicroCluster = []
         
-        index = ['Row'+str(i) for i in range(1, len(data)+1)]
-        buffer_data = pd.DataFrame(data=data, index=index, columns=['time','long','lat']).dropna(axis=1)
-
         db = DBSCAN(eps=0.00047, min_samples=minPts, algorithm='brute').fit(buffer_data)
         clusters = db.labels_
         buffer_data['clusters'] = clusters
@@ -261,9 +287,12 @@ def clustering(x):
         pMicroCluster = [y for y in broadcast_clusters.value if (y[0] == user) & (y[-1] == 'pMicroCluster') ]
         oMicroCluster = [y for y in broadcast_clusters.value if (y[0] == user) & (y[-1] == 'oMicroCluster') ]
 
-        for sample in buffer_data:
+        for sampleNumber in buffer_data:
+
+            sample = Sample(buffer_data.iloc[sampleNumber].values, times.iloc[sampleNumber])
             
             currentTimestamp += 1
+            sample.setTimestamp(currentTimestamp)
 
             merged = False
             TrueOutlier = True
@@ -335,28 +364,30 @@ def clustering(x):
 
                         oMicroCluster.clusters.pop(oMicroCluster.clusters.index(cluster))
 
-    output1 = [[y.center[0], y.center[1], y.radius, y.weight, y.creationTimeStamp, 'pMicroCluster'] for y in pMicroCluster]
-    output2 = [[y.center[0], y.center[1], y.radius, y.weight, y.creationTimeStamp, 'oMicroCluster'] for y in oMicroCluster]
-    return ( user, currentTimestamp, (output1), (output2) )
+    output1 = [[y.center[0], y.center[1], y.radius, y.weight, y.LS[0], y.LS[1], y.SS[0], y.SS[1], y.creationTimeStamp, 'pMicroCluster'] for y in pMicroCluster]
+    output2 = [[y.center[0], y.center[1], y.radius, y.weight, y.LS[0], y.LS[1], y.SS[0], y.SS[1], y.creationTimeStamp, 'oMicroCluster'] for y in oMicroCluster]
+    return ( user, currentTimestamp, output1, output2 )
 
 def coord_map(x):
-    timestamp = int(datetime.datetime.strptime(x['creation_datetime'].split('U',)[0], "%Y-%m-%d %H:%M:%S ").strftime("%s"))
-    user = x['user']
-    return (user, (timestamp, float(x['longitude']), float(x['latitude'])))
 
-def filter_data(x):
-    last_mod = [y for y in broadcast_date.value if (y[1] == x[0][1]) ]
+    date_all = datetime.datetime.strptime(x['creation_datetime'].split('U',)[0], "%Y-%m-%d %H:%M:%S ")
+    day = date_all.date()
+    timestamp = int(date_all.strftime("%s"))
+    user = x['user']
+
+    last_mod = [y for y in broadcast_date.value if (y[1] == user) ]
         
     if len(last_mod) == 0:
-        if (x[0][2] < (datetime.date.today() - datetime.timedelta(days=2))):
-            return x
+        if (day < (datetime.date.today() - datetime.timedelta(days=2))):
+            return (user, (timestamp, float(x['longitude']), float(x['latitude'])))
         else:
             return
     else:
-        if ((x[0][2] > last_mod[0][2]) & (x[0][2] < (datetime.date.today() - datetime.timedelta(days=2)))):
-            return x
+        if ((day > last_mod[0][2]) & (day < (datetime.date.today() - datetime.timedelta(days=2)))):
+            return (user, (timestamp, float(x['longitude']), float(x['latitude'])))
         else:
             return
+
 
 def list_to_array(x):
     output_list = -1*(np.ones((1,48)))
@@ -403,64 +434,79 @@ df2 = sqlContext.createDataFrame(last_mod_rdd, header_schema)
 unmodified_df = df1.join(df2, (df1.service == df2.service) & (df1.user == df2.user), how="leftanti")
 last_mod = unmodified_df.union(df2)
 
-'''
-dist_mean = (data_rdd
-             .map(dist_map)
-             .map(filter_data)
-             .filter(lambda x: x is not None)
-             .aggregateByKey(0,lambda acc,val: acc+val, lambda acc1, acc2: acc1+acc2)
-             .map(lambda x: ( (x[0][0], x[0][1], x[0][2], x[0][4]), (x[0][3], x[1]) ))
-             .combineByKey(lambda v:[(v[0], v[1])],lambda x,y:x+[y],lambda x,y:x+y)
-             .map(list_to_array)
-            )
-'''
 
-clustered_rdd = (data_rdd
+
+pCluster_rdd = (data_rdd
                  .map(coord_map)
+                 .filter(lambda x: x is not None)
+                 .filter(lambda x: x[1][1] != -1.0)
+                 .filter(lambda x: x[1][2] != -1.0)
                  .combineByKey(lambda v: [v], lambda x,y: x+[y], lambda x,y: x+y)
                  .map(clustering)
                  .filter(lambda x: x is not None)
-                 .map(lambda x: (x[0], ) )
+                 .filter(lambda x: len(x[2]) > 0)
+                 .flatMap(lambda data: [(data[0], data[1], x) for x in data[2]])
+                 .map(lambda x: (x[0], float(x[2][0]), float(x[2][1]), float(x[2][2]), float(x[2][3]), float(x[2][4]), \
+                    float(x[2][5]), float(x[2][6]), float(x[2][7]), x[2][8], float(0), '', '', '', '', x[2][-1]))
                  )
 
+
+oCluster_rdd = (data_rdd
+                 .map(coord_map)
+                 .filter(lambda x: x is not None)
+                 .filter(lambda x: x[1][1] != -1.0)
+                 .filter(lambda x: x[1][2] != -1.0)
+                 .combineByKey(lambda v: [v], lambda x,y: x+[y], lambda x,y: x+y)
+                 .map(clustering)
+                 .filter(lambda x: x is not None)
+                 .filter(lambda x: len(x[3]) > 0)
+                 .flatMap(lambda data: [(data[0], data[1], x) for x in data[3]])
+                 .map(lambda x: (x[0], float(x[2][0]), float(x[2][1]), float(x[2][2]), float(x[2][3]), float(x[2][4]), \
+                    float(x[2][5]), float(x[2][6]), float(x[2][7]), x[2][8], float(0), '', '', '', '', x[2][-1]))
+                 )
+
+
 print("\n\n")
-print(clustered_rdd.take(1))
-#print(data_rdd.count())
-#print(len(broadcast_date.value))
-#print(broadcast_date.value)
-#print(header.take(1))
-#print(header.count())
-#print(dist_mean.take(1))
-#print(speed_mean.take(1))
-#print(dist_var.take(1))
-#print(speed_var.take(1))
-#last_mod.union(last_mod_aux).show()
+print(pCluster_rdd.take(1))
+print("\n")
+print(oCluster_rdd.collect())
+print("\n")
+
+
+
+
 
 ## -------------------------------------------------------------------
 
 
-
 ## ------------------- Saving to MySQL database ----------------------
 
-## WRITE IN "distance" TABLE
+## WRITE IN "clusters" TABLE
 
-clust_schema = StructType([StructField('user', StringType(), False),
-                          StructField('longitude', FloatType(), False),
-                          StructField('latitude', FloatType(), False),
-                          StructField('radius', FloatType(), False),
-                          StructField('weight', FloatType(), False),
-                          StructField('creationTimeStamp', IntegerType(), False),
-                          StructField('altitude', FloatType(), False),
-                          StructField('wifi', StringType(), False),
-                          StructField('bluetooth', StringType(), False),
-                          StructField('activities', StringType(), False),
-                          StructField('places', StringType(), False),
-                          StructField('type_cluster', StringType(), False),
-                         ])
+pCluster_df = sqlContext.createDataFrame(pCluster_rdd, clust_schema)
+unmodified_p_df = pCluster_df.join(df_clusters, (pCluster_df.user == df_clusters.user) & \
+                  (pCluster_df.type_cluster == df_clusters.type_cluster) , how='leftanti')
+pCluster_df_out =  unmodified_p_df.union(pCluster_df).registerTempTable("pCluster_df")
+pCluster = sqlContext.table("pCluster_df")
+sqlContext.cacheTable("pCluster_df")
+pCluster.show(10000)
 
-dist_mean_df = sqlContext.createDataFrame(clustered_rdd, clust_schema)
+oCluster_df = sqlContext.createDataFrame(oCluster_rdd, clust_schema)
+unmodified_o_df = oCluster_df.join(df_clusters, (oCluster_df.user == df_clusters.user) & \
+                  (oCluster_df.type_cluster == df_clusters.type_cluster) , how='leftanti')
+oCluster_df_out =  unmodified_o_df.union(oCluster_df).registerTempTable("oCluster_df")
+oCluster = sqlContext.table("oCluster_df")
+sqlContext.cacheTable("oCluster_df")
+oCluster.show(10000)
 
-dist_mean_df.write.format('jdbc').options(
+pCluster.write.format('jdbc').options(
+      url= url,
+      driver=driver,
+      dbtable="clusters",
+      user=user,
+      password=password).mode('overwrite').save()
+
+oCluster.write.format('jdbc').options(
       url= url,
       driver=driver,
       dbtable="clusters",
@@ -468,11 +514,8 @@ dist_mean_df.write.format('jdbc').options(
       password=password).mode('append').save()
 
 
-#dist_mean_df.show(1)
 
-'''
 # Update last modification
-
 
 union_header = (last_mod.union(last_mod_aux)
                 .registerTempTable("union_header")
@@ -482,6 +525,7 @@ dd = sqlContext.table("union_header")
 sqlContext.cacheTable("union_header")
 dd.show(10000)
 
+'''
 dd.write.format('jdbc').options(
     url= url,
     driver=driver,
@@ -490,13 +534,14 @@ dd.write.format('jdbc').options(
     password=password).mode('overwrite').save('last_modification')
 
 sqlContext.uncacheTable("union_header")
-
-
-
-## ----- Performance
-duration = time() - t0
-num_data = dist_mean.count()
-print("\n\nTotal processing time: %0.2f seconds" %duration)
-print("Total processed data: %i users*days" %num_data)
-print("Performance: %0.2f seconds/(user*day)\n\n" %(float(duration)/(num_data+np.finfo(float).eps)))
 '''
+## -------------------------------------------------------------------
+
+
+## -------------------------- Performance -------------------------
+duration = time() - t0
+#num_data = dist_mean.count()
+print("\n\nTotal processing time: %0.2f seconds" %duration)
+#print("Total processed data: %i users*days" %num_data)
+#print("Performance: %0.2f seconds/(user*day)\n\n" %(float(duration)/(num_data+np.finfo(float).eps)))
+
