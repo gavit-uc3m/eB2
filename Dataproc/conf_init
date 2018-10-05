@@ -1,0 +1,11 @@
+
+sudo easy_install pip
+
+sudo pip install sklearn
+sudo pip install pandas
+sudo pip install scipy
+
+sudo apt-get install python-dev
+sudo pip install GPy
+sudo pip install matplotlib
+sudo apt-get install python-tk
