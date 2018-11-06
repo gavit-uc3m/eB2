@@ -6,6 +6,7 @@ from pyspark.sql import SQLContext, functions, SparkSession
 from pyspark import SparkConf, SparkContext
 from pyspark.sql.types import *
 from time import time
+from math import sqrt, sin, cos, atan2, radians
 import datetime
 import json
 import pprint
@@ -65,29 +66,21 @@ last_mod_actual = (df_last_mod
 if last_mod_actual.count() == 0:
     last_mod_aux = df_last_mod
 else:
-    ta = df_last_mod
-    tb = sqlContext.createDataFrame(last_mod_actual, header_schema)
+    last_mod_aux = df_last_mod.filter( df_last_mod.data_type != 'mobility' )
 
-    last_mod_aux = sqlContext.createDataFrame((ta
-                    .join(tb, (ta.service == tb.service) & (ta.user == tb.user) & (ta.date == tb.date) & \
-                          (ta.data_type == tb.data_type), how='left')
-                    .filter(tb.service.isNull())
-                    .rdd
-                    .map(lambda x: (x[0], x[1], x[2], x[3]))
-                   ), header_schema)
-    
 
 #Broadcast the date of last modification
 broadcast_data_type = sc.broadcast('mobility')
 broadcast_date = sc.broadcast(last_mod_actual.collect())
-'''
+
 print('\nbroadcast_date: ')
 print(broadcast_date.value)
 print('\nlast_mod_aux: ')
-print(last_mod_aux.collect())
+print(last_mod_aux.show(10000))
 print('\ndf_last_mod: ')
-print(df_last_mod.rdd.collect())
-'''
+print(df_last_mod.show(10000))
+
+
 ## -------------------------------------------------------------------
 
 
@@ -124,6 +117,9 @@ SELECT *
 from data
 where distance is not null
 and speed is not null
+and latitude is not null
+and longitude is not null
+and accuracy < 200
 """
 clean_data = sqlContext.sql(sql_query)
 data_rdd = clean_data.rdd
@@ -133,6 +129,7 @@ data_rdd = clean_data.rdd
 
 
 ## --------------------- Extraction and processing of data ----------------
+## --------- Functions ----------
 def header_map(x):
     date_all = datetime.datetime.strptime(x['creation_datetime'].split(' U',)[0].split('.',)[0], "%Y-%m-%d %H:%M:%S")
     day = date_all.date()
@@ -147,7 +144,8 @@ def header_map(x):
         else: 
             return
     else:
-        if (day > last_mod[0][2]) & (day < (datetime.date.today() - datetime.timedelta(days=2))):
+        date_mod = datetime.datetime.strptime(last_mod[0][2], "%Y-%m-%d").date()
+        if (day > date_mod) & (day < (datetime.date.today() - datetime.timedelta(days=2))):
             return (service, user, day, broadcast_data_type.value)
         else:
             return
@@ -182,16 +180,17 @@ def coordinate_map(x):
     moment = date_all.time()
     slot = math.floor((moment.hour*60+moment.minute+moment.second/60)/30)
     user = x['user']
-    latitude = float(x['longitude'])
-    longitude = float(x['latitude'])
-    return ((user, day, 'app', slot), (latitude,longitude))
+    service = x['service']
+    longitude = float(x['longitude'])
+    latitude = float(x['latitude'])
+    return ((service, user, day, 'app', int(slot)), (latitude,longitude))
 
 def at_home(x):
     a = (sin(radians(x[1][0])/2))**2 + cos(radians(x[1][0])) * (sin(radians(x[1][1])/2))**2
     c = 2 * atan2(sqrt(a), sqrt(1-a))
     distance = 6373.0 * c   #está en km
    
-    if (x[0][1] < (date.today() - timedelta(days=4))):
+    if (x[0][2] < (datetime.date.today() - datetime.timedelta(days=4))):
         #está en casa si la distancia al 0 es menor de 500m
         return(x[0],(1 if distance <= 0.5 else 0))
     else:
@@ -199,14 +198,15 @@ def at_home(x):
 
 def filter_data(x):
     last_mod = [y for y in broadcast_date.value if (y[1] == x[0][1]) ]
-        
+
     if len(last_mod) == 0:
         if (x[0][2] < (datetime.date.today() - datetime.timedelta(days=2))):
             return x
         else:
             return
     else:
-        if ((x[0][2] > last_mod[0][2]) & (x[0][2] < (datetime.date.today() - datetime.timedelta(days=2)))):
+        date_mod = datetime.datetime.strptime(last_mod[0][2], "%Y-%m-%d").date()
+        if ((x[0][2] > date_mod) & (x[0][2] < (datetime.date.today() - datetime.timedelta(days=2)))):
             return x
         else:
             return
@@ -235,10 +235,13 @@ def list_to_array_var(x):
 def list_to_array_home(x):
     output_list = np.zeros((1,48))
     for idx, value in enumerate(x[1]):
-        output_list[0,value[0]] = value[1]
-    out = ([x[0][2]], output_list.tolist()[0], [broadcast_service.value , x[0][0], x[0][1], 'home'])
+        output_list[0, int(value[0])] = value[1]
+    out = ([x[0][3]], output_list.tolist()[0], [x[0][0], x[0][1], x[0][2], 'home'])
    
     return list(y for x in out for y in x)
+
+## ------- End functions --------------
+
 
 
 
@@ -247,6 +250,7 @@ header = (data_rdd
           .filter(lambda x: x is not None)
           .distinct()
          )
+
 
 if header.count() == 0:
     last_mod_rdd = last_mod_actual
@@ -259,10 +263,13 @@ else:
                     .map(lambda x: (x[0], x[1][-1]))
                     .map(lambda x: (x[0][0], x[0][1], x[1], x[0][2]))
                    )
-df1 = sqlContext.createDataFrame(last_mod_actual, header_schema)
+
+df1 = sqlContext.createDataFrame(last_mod_actual.map(lambda x: (x[0], x[1], datetime.datetime.strptime(x[2], "%Y-%m-%d").date(), x[3]) ), header_schema)
 df2 = sqlContext.createDataFrame(last_mod_rdd, header_schema)
+
 unmodified_df = df1.join(df2, (df1.service == df2.service) & (df1.user == df2.user), how="leftanti")
 last_mod = unmodified_df.union(df2)
+
 
 
 dist_mean = (data_rdd
@@ -310,13 +317,14 @@ speed_var = (data_rdd
              .map(list_to_array_var)
            )
 
-dist_home = (datapoint_rdd
+
+dist_home = (data_rdd
                .map(coordinate_map)
                .map(at_home)
                .filter(lambda x: x is not None)
                .groupByKey()
                .map(lambda x: (x[0], list(x[1])))
-               .map(lambda x: ((x[0][0],x[0][1], x[0][2]), (x[0][3], max(x[1], key = x[1].count))))
+               .map(lambda x: ((x[0][0],x[0][1], x[0][2], x[0][3]), (x[0][4], max(x[1], key = x[1].count))))
                .groupByKey()
                .map(lambda x: (x[0], list(x[1])))
                .map(list_to_array_home)
@@ -324,6 +332,7 @@ dist_home = (datapoint_rdd
 
 
 print("\n\n")
+#print(dist_home.take(1))
 #print(data_rdd.count())
 #print(len(broadcast_date.value))
 #print(broadcast_date.value)
@@ -350,7 +359,7 @@ mob_sum_schema = StructType([StructField('service', StringType(), False),
                               ])
 
 # To avoid duplicates in father table if code is not executed till the end
-mob_sum_new = sqlContext.createDataFrame(header.map(lambda a: (a[0], a[1], a[2])), mob_sum_schema)
+mob_sum_new = sqlContext.createDataFrame(header.map(lambda a: (a[0], a[1], a[2])) , mob_sum_schema)
 mob_sum_old = sqlContext.read.jdbc(url=url, table="mobility_summary", properties=properties)
 mob_sum_df = mob_sum_new.join(mob_sum_old, (mob_sum_new.service == mob_sum_old.service) & (mob_sum_new.user == mob_sum_old.user) & (mob_sum_new.date == mob_sum_old.date), how="leftanti")
 
@@ -361,8 +370,8 @@ mob_sum_df.write.format('jdbc').options(
       user=user,
       password=password).mode('append').save()
 
-#mob_sum_df.show(1)
 
+#mob_sum_df.show(1)
 
 ## WRITE IN "distance" TABLE
 
@@ -532,8 +541,7 @@ dist_home_df.write.format('jdbc').options(
 
 
 
-
-# Update last modification
+# -------- Update last modification ----------
 
 
 union_header = (last_mod.union(last_mod_aux)
@@ -555,7 +563,7 @@ sqlContext.uncacheTable("union_header")
 
 
 
-## ----- Performance
+## -------- Performance ---------
 duration = time() - t0
 num_data = dist_mean.count()
 print("\n\nTotal processing time: %0.2f seconds" %duration)

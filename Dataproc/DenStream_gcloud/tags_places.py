@@ -106,14 +106,6 @@ broadcast_date = sc.broadcast(last_mod_actual.collect())
 broadcast_clusters = sc.broadcast(df_clusters.rdd.collect())
 
 
-print('\nbroadcast_date: ')
-print(broadcast_date.value)
-print('\nlast_mod_aux: ')
-print(last_mod_aux.show(10000))
-print('\nbroadcast_clusters: ')
-print(broadcast_clusters.value)
-print('\n')
-
 
 ## -------------------------------------------------------------------
 
@@ -193,19 +185,7 @@ def coord_map(x):
     timestamp = int(date_all.strftime("%s"))
     user = x['user']
 
-    last_mod = [y for y in broadcast_date.value if (y[1] == user) ]
-
-    if len(last_mod) == 0:
-        if (day < (datetime.date.today() - datetime.timedelta(days=2))):
-            return (user, (timestamp, float(x['longitude']), float(x['latitude'])))
-        else:
-            return
-    else:
-        day_last_mod = datetime.datetime.strptime(last_mod[0][2], "%Y-%m-%d").date()
-        if ((day > day_last_mod) & (day < (datetime.date.today() - datetime.timedelta(days=2)))):
-            return (user, (timestamp, float(x['longitude']), float(x['latitude'])))
-        else:
-            return
+    return (user, (timestamp, float(x['longitude']), float(x['latitude']), x['places'][0]['placetype']))
 
 
 def updateAll(pMicroCluster, oMicroCluster, mc):
@@ -434,22 +414,13 @@ df2 = sqlContext.createDataFrame(last_mod_rdd, header_schema)
 unmodified_df = df1.join(df2, (df1.service == df2.service) & (df1.user == df2.user), how="leftanti")
 last_mod = unmodified_df.union(df2)
 
-last_mod.show(100000)
 
 pCluster_rdd = (data_rdd
                  .map(coord_map)
                  .filter(lambda x: x is not None)
-                 .filter(lambda x: x[1][1] != -1.0)
-                 .filter(lambda x: x[1][2] != -1.0)
-                 .combineByKey(lambda v: [v], lambda x,y: x+[y], lambda x,y: x+y)
-                 .map(clustering)
-                 .filter(lambda x: x is not None)
-                 .filter(lambda x: len(x[2]) > 0)
-                 .flatMap(lambda data: [(data[0], data[1], x) for x in data[2]])
-                 .map(lambda x: (x[0], x[2][0], float(x[2][1]), float(x[2][2]), float(x[2][3]), float(x[2][4]), float(x[2][5]), \
-                    float(x[2][6]), float(x[2][7]), float(x[2][8]), x[2][9], x[2][10], float(0), '', '', '', '', x[2][-1]))
                  )
 
+'''
 
 oCluster_rdd = (data_rdd
                  .map(coord_map)
@@ -469,78 +440,6 @@ oCluster_rdd = (data_rdd
 print("\n\n")
 print(pCluster_rdd.take(1))
 print("\n")
-print(oCluster_rdd.collect())
-print("\n")
-'''
 
 
-
-
-## -------------------------------------------------------------------
-
-
-## ------------------- Saving to MySQL database ----------------------
-
-## WRITE IN "clusters" TABLE
-
-pCluster_df = sqlContext.createDataFrame(pCluster_rdd, clust_schema)
-unmodified_p_df = pCluster_df.join(df_clusters, (pCluster_df.user == df_clusters.user) & \
-                  (pCluster_df.type_cluster == df_clusters.type_cluster) , how='leftanti')
-pCluster_df_out =  unmodified_p_df.union(pCluster_df).registerTempTable("pCluster_df")
-pCluster = sqlContext.table("pCluster_df")
-sqlContext.cacheTable("pCluster_df")
-pCluster.show(10000)
-
-oCluster_df = sqlContext.createDataFrame(oCluster_rdd, clust_schema)
-unmodified_o_df = oCluster_df.join(df_clusters, (oCluster_df.user == df_clusters.user) & \
-                  (oCluster_df.type_cluster == df_clusters.type_cluster) , how='leftanti')
-oCluster_df_out =  unmodified_o_df.union(oCluster_df).registerTempTable("oCluster_df")
-oCluster = sqlContext.table("oCluster_df")
-sqlContext.cacheTable("oCluster_df")
-oCluster.show(10000)
-
-
-
-pCluster.write.format('jdbc').options(
-      url= url,
-      driver=driver,
-      dbtable="clusters",
-      user=user,
-      password=password).mode('overwrite').save()
-
-oCluster.write.format('jdbc').options(
-      url= url,
-      driver=driver,
-      dbtable="clusters",
-      user=user,
-      password=password).mode('append').save()
-
-print('\n\nClusters properly saved in Cloud SQL\n\n')
-
-# Update last modification
-
-union_header = (last_mod.union(last_mod_aux)
-                .registerTempTable("union_header")
-               )
-
-dd = sqlContext.table("union_header")
-sqlContext.cacheTable("union_header")
-dd.show(10000)
-
-
-dd.write.format('jdbc').options(
-    url= url,
-    driver=driver,
-    dbtable='last_modification',
-    user=user,
-    password=password).mode('overwrite').save('last_modification')
-
-sqlContext.uncacheTable("union_header")
-
-## -------------------------------------------------------------------
-
-
-## -------------------------- Performance -------------------------
-duration = time() - t0
-print("\n\nTotal processing time: %0.2f seconds" %duration)
 
