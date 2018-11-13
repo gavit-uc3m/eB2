@@ -8,6 +8,10 @@ from pyspark.sql.types import *
 from time import time, mktime
 from sklearn.cluster import DBSCAN
 from scipy.interpolate import interp1d
+from operator import itemgetter
+from itertools import groupby
+
+
 #import sklearn
 import copy
 import datetime as dt
@@ -131,7 +135,7 @@ data.createOrReplaceTempView("data")
 sql_query = """
 SELECT *
 from data
-where actigraphy is not null
+where activity is not null
 """
 
 clean_data = sqlContext.sql(sql_query)
@@ -163,16 +167,18 @@ def header_map(x):
         else:
             return
 
-def actigraf_map(x):
+def tilting_map(x):
     date_all = dt.datetime.strptime(x['creation_datetime'].split(' U',)[0].split('.',)[0], "%Y-%m-%d %H:%M:%S")
     day = date_all.date()
     moment = date_all.time()
     user = x['user']
-    if len(x['actigraphy']) > 0:
-      actigraphy = np.mean([int(i) for i in x['actigraphy']])/16/10/9.81
-      return ((user, day), (moment, actigraphy))
-    else:
-      return
+    activity = sorted(x['activity'], key=itemgetter(0))
+    if len(activity) > 0:
+      if str(activity[-1]['name']) in ['tilting', 'walking', 'running']:
+        return ((user, day), (moment, 1))
+      else:
+        return ((user, day), (moment, 0))
+
 
     '''
 
@@ -221,28 +227,17 @@ def actig_preprocessing(x):
     return (header, ordered_list)
 
 
-def compute_circadian(x):
+def compute_standing(x):
 
     data = x[1]
-    len_data = len(data)
-    x_range = [ y for y in range(0,24*3600,300) ]
+    standing = 0
 
-    T = 24 # 24h period
-    X = np.ones([len_data, 3])
-    X[:,1] = [math.cos((2*math.pi)/T*y) for y in np.linspace(0,T,len_data)]
-    X[:,2] = [math.sin((2*math.pi)/T*y) for y in np.linspace(0,T,len_data)]
-    
-    X_inv = np.linalg.solve(X.T.dot(X), X.T)
-    beta = X_inv.dot(data)
-    cosine = beta[0] + beta[1]*X[:,1] + beta[2]*X[:,2]
+    for val in data:
+      if ( (val[-1].hour*60+val[-1].minute) - (val[0].hour*60+val[0].minute)) >= 30:
+        standing += 1
 
-    idx_acrophase = [i for i,j in enumerate(cosine) if np.equal(j,np.amax(cosine))][0]
-    acrophase = timestampToTime(x_range[idx_acrophase])
-    mesor = np.mean(cosine)
-    amplitude = max(cosine)-mesor
-    
+    return (x[0], standing)
 
-    return (x[0], (acrophase, mesor, amplitude) )
 
 
 '''
@@ -257,111 +252,18 @@ header = (data_rdd
 
 
 
-actigraf_rdd = (data_rdd
-                 .map(actigraf_map)
+standing_periods = (data_rdd
+                 .map(tilting_map)
                  .filter(lambda x: x is not None)
                  .combineByKey(lambda v: [v], lambda x,y: x+[y], lambda x,y: x+y)
-                 .map(actig_preprocessing)
-                 .map(compute_circadian)
+                 .map(lambda x: (x[0],  sorted(x[1], key=itemgetter(0))))
+                 .map(lambda x: (x[0], [( [x[0] for x in group]) for key, group in groupby(x[1], key=itemgetter(1)) if key == 1 ]) )
+                 .map(compute_standing)
                  )
 
 
 
 print("\n\n")
-print(actigraf_rdd.take(1))
+print(standing_periods.take(20))
 print("\n")
 
-
-
-
-'''
-if header.count() == 0:
-    last_mod_rdd = last_mod_actual
-    print('Header vacio')
-else:
-    last_mod_rdd = (header
-                    .map(lambda x: ((x[0], x[1], x[3]), x[2]))
-                    .groupByKey()
-                    .map(lambda x: (x[0], sorted(list(x[1]))))
-                    .map(lambda x: (x[0], x[1][-1]))
-                    .map(lambda x: (x[0][0], x[0][1], x[1], x[0][2]))
-                   )
-df1 = sqlContext.createDataFrame(last_mod_actual.map(lambda x: (x[0], x[1], datetime.datetime.strptime(x[2], "%Y-%m-%d").date(), x[3]) ), header_schema)
-df2 = sqlContext.createDataFrame(last_mod_rdd, header_schema)
-unmodified_df = df1.join(df2, (df1.service == df2.service) & (df1.user == df2.user), how="leftanti")
-last_mod = unmodified_df.union(df2)
-
-last_mod.show(100000)
-
-
-## -------------------------------------------------------------------
-
-
-## ------------------- Saving to MySQL database ----------------------
-
-## WRITE IN "clusters" TABLE
-
-pCluster_df = sqlContext.createDataFrame(pCluster_rdd, clust_schema)
-unmodified_p_df = pCluster_df.join(df_clusters, (pCluster_df.user == df_clusters.user) & \
-                  (pCluster_df.type_cluster == df_clusters.type_cluster) , how='leftanti')
-pCluster_df_out =  unmodified_p_df.union(pCluster_df).registerTempTable("pCluster_df")
-pCluster = sqlContext.table("pCluster_df")
-sqlContext.cacheTable("pCluster_df")
-pCluster.show(10000)
-
-oCluster_df = sqlContext.createDataFrame(oCluster_rdd, clust_schema)
-unmodified_o_df = oCluster_df.join(df_clusters, (oCluster_df.user == df_clusters.user) & \
-                  (oCluster_df.type_cluster == df_clusters.type_cluster) , how='leftanti')
-oCluster_df_out =  unmodified_o_df.union(oCluster_df).registerTempTable("oCluster_df")
-oCluster = sqlContext.table("oCluster_df")
-sqlContext.cacheTable("oCluster_df")
-oCluster.show(10000)
-
-
-
-pCluster.write.format('jdbc').options(
-      url= url,
-      driver=driver,
-      dbtable="clusters",
-      user=user,
-      password=password).mode('overwrite').save()
-
-oCluster.write.format('jdbc').options(
-      url= url,
-      driver=driver,
-      dbtable="clusters",
-      user=user,
-      password=password).mode('append').save()
-
-print('\n\nClusters properly saved in Cloud SQL\n\n')
-
-# Update last modification
-
-union_header = (last_mod.union(last_mod_aux)
-                .registerTempTable("union_header")
-               )
-
-dd = sqlContext.table("union_header")
-sqlContext.cacheTable("union_header")
-dd.show(10000)
-
-
-dd.write.format('jdbc').options(
-    url= url,
-    driver=driver,
-    dbtable='last_modification',
-    user=user,
-    password=password).mode('overwrite').save('last_modification')
-
-sqlContext.uncacheTable("union_header")
-
-## -------------------------------------------------------------------
-
-
-## -------------------------- Performance -------------------------
-duration = time() - t0
-print("\n\nTotal processing time: %0.2f seconds" %duration)
-
-
-
-'''
